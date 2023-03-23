@@ -3,49 +3,104 @@ use datetime::*;
 use std::io;
 use std::mem::transmute;
 use std::time::Duration;
+use winapi::um::minwinbase::SYSTEMTIME;
 use winreg::enums::*;
 use winreg::RegKey;
+use winreg::RegValue;
 
 fn main() -> io::Result<()> {
-    println!("---------- User profiling ----------");
+    println!("--------------- User profiling ---------------\n");
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
 
     // get searches accomplished in Explorer
+    println!("----- searches accomplished in Explorer ------");
     let word_wheel_query =
         hkcu.open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\WordWheelQuery")?;
+
     println!("MRU position\t| Number\t| Value\n----------------------------------------------");
+    iter_list_with_mru(word_wheel_query);
+
+    // get recent doc with timestamps when opened
+    println!("\n\n---------------- Recents docs ----------------");
+    let recent_docs =
+        hkcu.open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\RecentDocs")?;
+    for sub_key in recent_docs.enum_keys().map(|x| x.unwrap()) {
+        println!("File type : {}", sub_key);
+        let extension = recent_docs.open_subkey(sub_key)?;
+        iter_list_with_mru(extension);
+    }
+
+    Ok(())
+}
+
+
+pub fn iter_list_with_mru(regkey: RegKey) {
+    let raw_last_write_time = regkey.query_info().unwrap().get_last_write_time_system();
+    print!("Last write : ");
+    print_systemtime(raw_last_write_time);
+
+    // find MRUListEx to get order of usage
     let mut mru_position = Vec::new();
-    for (name, value) in word_wheel_query.enum_values().map(|x| x.unwrap()) {
+    for (name, value) in regkey.enum_values().map(|x| x.unwrap()) {
         if name == "MRUListEx" {
-            // convert order of searche from u8 to u32
-            let mut counter: usize = 0;
-            let mut tmp_array: [u8; 4] = [0u8; 4];
-            for bytes in value.bytes.clone() {
-                tmp_array[counter % 4] = bytes;
-                counter += 1;
-                if counter % 4 == 0 {
-                    // last number is always max int u32
-                    if unsafe { transmute::<[u8; 4], u32>(tmp_array) }.to_le() != u32::MAX {
-                        mru_position.push(unsafe { transmute::<[u8; 4], u32>(tmp_array) }.to_le());
-                    }
-                }
-            }
+            mru_position = u8_array_to_u32_vec(value);
+            break;
+        }
+    }
+
+    for (name, value) in regkey.enum_values().map(|x| x.unwrap()) {
+        if name == "MRUListEx" {
             continue;
         }
         println!(
-            "{}\t\t| {}\t\t| {}",
+            "{}\t\t| {}\t\t| {:x?}",
             mru_position
                 .iter()
                 .position(|x| x.to_string() == name)
                 .unwrap(),
             name,
-            String::from_utf8(value.bytes).unwrap()
+            value.bytes
         );
     }
+}
 
-    // get recent doc with timestamps when opened
+pub fn u8_array_to_u32_vec(value: RegValue) -> Vec<u32> {
+    // convert order of searche from u8 to u32
+    let mut mru_position = Vec::new();
+    let mut counter: usize = 0;
+    let mut tmp_array: [u8; 4] = [0u8; 4];
+    for bytes in value.bytes.clone() {
+        tmp_array[counter % 4] = bytes;
+        counter += 1;
+        if counter % 4 == 0 {
+            // last number is always max int u32
+            if unsafe { transmute::<[u8; 4], u32>(tmp_array) }.to_le() != u32::MAX {
+                mru_position.push(unsafe { transmute::<[u8; 4], u32>(tmp_array) }.to_le());
+            }
+        }
+    }
+    mru_position
+}
 
-    Ok(())
+pub fn print_systemtime(system_time_val: SYSTEMTIME) {
+    print!(
+        "{:2}.{:2}.{:2} ",
+        system_time_val.wDay, system_time_val.wMonth, system_time_val.wYear
+    );
+    match system_time_val.wDayOfWeek {
+        0 => print!("Sun "),
+        1 => print!("Mon "),
+        2 => print!("Tue "),
+        3 => print!("Wed "),
+        4 => print!("Thu "),
+        5 => print!("Fri "),
+        6 => print!("Sat "),
+        _ => println!(""),
+    }
+    println!(
+        "{:2}:{:2}:{:2} ",
+        system_time_val.wHour, system_time_val.wMinute, system_time_val.wSecond
+    );
 }
 
 pub fn bin_to_systemtime(bin_value: Vec<u8>) {
