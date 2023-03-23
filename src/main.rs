@@ -1,15 +1,49 @@
 use byteorder::{LittleEndian, ReadBytesExt};
 use datetime::*;
 use std::io;
+use std::mem::transmute;
 use std::time::Duration;
 use winreg::enums::*;
 use winreg::RegKey;
-use winreg::RegValue;
 
 fn main() -> io::Result<()> {
     println!("---------- User profiling ----------");
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
 
-    //let hklm = RegKey::predef();
+    // get searches accomplished in Explorer
+    let word_wheel_query =
+        hkcu.open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\WordWheelQuery")?;
+    println!("MRU position\t| Number\t| Value\n----------------------------------------------");
+    let mut mru_position = Vec::new();
+    for (name, value) in word_wheel_query.enum_values().map(|x| x.unwrap()) {
+        if name == "MRUListEx" {
+            // convert order of searche from u8 to u32
+            let mut counter: usize = 0;
+            let mut tmp_array: [u8; 4] = [0u8; 4];
+            for bytes in value.bytes.clone() {
+                tmp_array[counter % 4] = bytes;
+                counter += 1;
+                if counter % 4 == 0 {
+                    // last number is always max int u32
+                    if unsafe { transmute::<[u8; 4], u32>(tmp_array) }.to_le() != u32::MAX {
+                        mru_position.push(unsafe { transmute::<[u8; 4], u32>(tmp_array) }.to_le());
+                    }
+                }
+            }
+            continue;
+        }
+        println!(
+            "{}\t\t| {}\t\t| {}",
+            mru_position
+                .iter()
+                .position(|x| x.to_string() == name)
+                .unwrap(),
+            name,
+            String::from_utf8(value.bytes).unwrap()
+        );
+    }
+
+    // get recent doc with timestamps when opened
 
     Ok(())
 }
