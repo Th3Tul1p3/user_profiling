@@ -1,8 +1,5 @@
-use byteorder::{LittleEndian, ReadBytesExt};
-use datetime::*;
 use std::io;
 use std::mem::transmute;
-use std::time::Duration;
 use winapi::um::minwinbase::SYSTEMTIME;
 use winreg::enums::*;
 use winreg::RegKey;
