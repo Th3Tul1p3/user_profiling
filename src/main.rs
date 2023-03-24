@@ -27,12 +27,70 @@ fn main() -> io::Result<()> {
     for sub_key in recent_docs.enum_keys().map(|x| x.unwrap()) {
         println!("File type : {}", sub_key);
         let extension = recent_docs.open_subkey(sub_key)?;
-        iter_list_with_mru(extension);
+        iter_list_with_mru_rd(extension);
+        println!("");
     }
 
+    // evidence of file save
+    let _comdlg32 = hkcu.open_subkey(
+            "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\ComDlg32\\OpenSavePidlMRU",
+        )?;
+
+    /*    // evidence of typed path
+        let _typed_paths =
+            hkcu.open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\TypedPaths")?;
+    */
     Ok(())
 }
 
+pub fn iter_list_with_mru_rd(regkey: RegKey) {
+    let raw_last_write_time = regkey.query_info().unwrap().get_last_write_time_system();
+    print!("Last write : ");
+    print_systemtime(raw_last_write_time);
+
+    // find MRUListEx to get order of usage
+    let mut mru_position = Vec::new();
+    for (name, value) in regkey.enum_values().map(|x| x.unwrap()) {
+        if name == "MRUListEx" {
+            mru_position = u8_array_to_u32_vec(value);
+            break;
+        }
+    }
+    println!("MRU position\t| Number\t| Value\n----------------------------------------------");
+    for (name, value) in regkey.enum_values().map(|x| x.unwrap()) {
+        if name == "MRUListEx" {
+            continue;
+        }
+        // convert the value in array of u32 
+        let mut byte_array: Vec<u16> = Vec::new();
+        for x in (0..value.bytes.len()).step_by(2) {
+            let a: [u8; 2] = value.bytes[x..x + 2].try_into().unwrap();
+            byte_array.push(unsafe { transmute::<[u8; 2], u16>(a) }.to_le())
+        }
+        // the value contain filename_utf16, filname.lnk_utf8, filename.lnk_utf16
+        // We take the first and the last value and we clean it 
+        let split_array = byte_array.split_at(byte_array.iter().position(|x| *x == 0u16).unwrap());
+        let first_string_array = split_array.0;
+        let second_string_start = split_array
+            .1
+            .iter()
+            .position(|&r| r == *first_string_array.get(0).unwrap())
+            .unwrap();
+        let mut second_string = split_array.1.split_at(second_string_start).1;
+        second_string = second_string.split_at(second_string.iter().position(|x| *x == 0u16).unwrap()).0;
+        
+        println!(
+            "{}\t\t| {}\t\t| {}, {}",
+            mru_position
+                .iter()
+                .position(|x| x.to_string() == name)
+                .unwrap(),
+            name,
+            String::from_utf16(first_string_array).unwrap(),
+            String::from_utf16(second_string).unwrap()
+        );
+    }
+}
 
 pub fn iter_list_with_mru(regkey: RegKey) {
     let raw_last_write_time = regkey.query_info().unwrap().get_last_write_time_system();
@@ -53,13 +111,13 @@ pub fn iter_list_with_mru(regkey: RegKey) {
             continue;
         }
         println!(
-            "{}\t\t| {}\t\t| {:x?}",
+            "{}\t\t| {}\t\t| {}",
             mru_position
                 .iter()
                 .position(|x| x.to_string() == name)
                 .unwrap(),
             name,
-            value.bytes
+            String::from_utf8(value.bytes).unwrap(),
         );
     }
 }
