@@ -31,21 +31,26 @@ fn main() -> io::Result<()> {
     // evidence of file save
     println!("\n\n----------------- Saved file -----------------");
     let comdlg32 = hkcu.open_subkey(
-            "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\ComDlg32\\OpenSavePidlMRU",
-        )?;
-        for sub_key in comdlg32.enum_keys().map(|x| x.unwrap()) {
-            println!("File type : {}", sub_key);
-            let extension = comdlg32.open_subkey(sub_key)?;
-            iter_list_with_mru_sf(extension);
-            println!("");
-           // break;
-           // convert PIDL to path.... must find a way 
-        
-        }
-    /*    // evidence of typed path
-        let _typed_paths =
-            hkcu.open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\TypedPaths")?;
-    */
+        "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\ComDlg32\\OpenSavePidlMRU",
+    )?;
+    for sub_key in comdlg32.enum_keys().map(|x| x.unwrap()) {
+        println!("File type : {}", sub_key);
+        let extension = comdlg32.open_subkey(sub_key)?;
+        iter_list_with_mru_sf(extension);
+        println!("");
+        // break;
+        // convert PIDL to path.... must find a way
+    }
+
+    // evidence of typed path
+    println!("\n\n----------------- Typed path -----------------");
+    let typed_paths =
+        hkcu.open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\TypedPaths")?;
+    for (name, value) in typed_paths.enum_values().map(|x| x.unwrap()) {
+        println!("{name}: {}", value.to_string());
+    }
+    println!();
+
     Ok(())
 }
 
@@ -67,9 +72,9 @@ pub fn iter_list_with_mru_sf(regkey: RegKey) {
         if name == "MRUListEx" {
             continue;
         }
-        // convert the value in array of u32 
+        // convert the value in array of u32
         let mut byte_array: Vec<u16> = Vec::new();
-        for x in (0..value.bytes.len()-2).step_by(2) {
+        for x in (0..value.bytes.len() - 2).step_by(2) {
             let a: [u8; 2] = value.bytes[x..x + 2].try_into().unwrap();
             byte_array.push(unsafe { transmute::<[u8; 2], u16>(a) }.to_le())
         }
@@ -104,14 +109,14 @@ pub fn iter_list_with_mru_rd(regkey: RegKey) {
         if name == "MRUListEx" {
             continue;
         }
-        // convert the value in array of u32 
+        // convert the value in array of u32
         let mut byte_array: Vec<u16> = Vec::new();
         for x in (0..value.bytes.len()).step_by(2) {
             let a: [u8; 2] = value.bytes[x..x + 2].try_into().unwrap();
             byte_array.push(unsafe { transmute::<[u8; 2], u16>(a) }.to_le())
         }
         // the value contain filename_utf16, filname.lnk_utf8, filename.lnk_utf16
-        // We take the first and the last value and we clean it 
+        // We take the first and the last value and we clean it
         let split_array = byte_array.split_at(byte_array.iter().position(|x| *x == 0u16).unwrap());
         let first_string_array = split_array.0;
         let second_string_start = split_array
@@ -120,8 +125,10 @@ pub fn iter_list_with_mru_rd(regkey: RegKey) {
             .position(|&r| r == *first_string_array.get(0).unwrap())
             .unwrap();
         let mut second_string = split_array.1.split_at(second_string_start).1;
-        second_string = second_string.split_at(second_string.iter().position(|x| *x == 0u16).unwrap()).0;
-        
+        second_string = second_string
+            .split_at(second_string.iter().position(|x| *x == 0u16).unwrap())
+            .0;
+
         println!(
             "{}\t\t| {}\t\t| {}, {}",
             mru_position
