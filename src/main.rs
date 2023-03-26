@@ -36,15 +36,54 @@ fn main() -> io::Result<()> {
         for sub_key in comdlg32.enum_keys().map(|x| x.unwrap()) {
             println!("File type : {}", sub_key);
             let extension = comdlg32.open_subkey(sub_key)?;
-            iter_list_with_mru_rd(extension);
+            iter_list_with_mru_sf(extension);
             println!("");
-            break;
+           // break;
+           // convert PIDL to path.... must find a way 
+        
         }
     /*    // evidence of typed path
         let _typed_paths =
             hkcu.open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\TypedPaths")?;
     */
     Ok(())
+}
+
+pub fn iter_list_with_mru_sf(regkey: RegKey) {
+    let raw_last_write_time = regkey.query_info().unwrap().get_last_write_time_system();
+    print!("Last write : ");
+    print_systemtime(raw_last_write_time);
+
+    // find MRUListEx to get order of usage
+    let mut mru_position = Vec::new();
+    for (name, value) in regkey.enum_values().map(|x| x.unwrap()) {
+        if name == "MRUListEx" {
+            mru_position = u8_array_to_u32_vec(value);
+            break;
+        }
+    }
+    println!("MRU position\t| Number\t| Value\n----------------------------------------------");
+    for (name, value) in regkey.enum_values().map(|x| x.unwrap()) {
+        if name == "MRUListEx" {
+            continue;
+        }
+        // convert the value in array of u32 
+        let mut byte_array: Vec<u16> = Vec::new();
+        for x in (0..value.bytes.len()-2).step_by(2) {
+            let a: [u8; 2] = value.bytes[x..x + 2].try_into().unwrap();
+            byte_array.push(unsafe { transmute::<[u8; 2], u16>(a) }.to_le())
+        }
+        let split_array = byte_array.split_at(16).0;
+        println!(
+            "{}\t\t| {}\t\t| {:x?}",
+            mru_position
+                .iter()
+                .position(|x| x.to_string() == name)
+                .unwrap(),
+            name,
+            split_array
+        );
+    }
 }
 
 pub fn iter_list_with_mru_rd(regkey: RegKey) {
