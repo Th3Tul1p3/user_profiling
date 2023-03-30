@@ -1,6 +1,8 @@
+use datetime::*;
 use std::io;
 use std::mem::transmute;
 use winapi::um::minwinbase::SYSTEMTIME;
+use windows::{Win32::System::Com::*, Win32::UI::Shell::Common::*, Win32::UI::Shell::*};
 use winreg::enums::*;
 use winreg::RegKey;
 use winreg::RegValue;
@@ -38,8 +40,7 @@ fn main() -> io::Result<()> {
         let extension = comdlg32.open_subkey(sub_key)?;
         iter_list_with_mru_sf(extension);
         println!("");
-        // break;
-        // convert PIDL to path.... must find a way
+        break;
     }
 
     // evidence of typed path
@@ -49,8 +50,58 @@ fn main() -> io::Result<()> {
     for (name, value) in typed_paths.enum_values().map(|x| x.unwrap()) {
         println!("{name}: {}", value.to_string());
     }
-    println!();
 
+    // evidence of office file
+    println!("\n\n--------------- Office evidence --------------");
+    // TODO gestion d'erreur si pas de version 16.0
+    let office = hkcu.open_subkey("Software\\Microsoft\\Office\\16.0")?;
+    // enumerate different office (Work, excel, Onenote....)
+    for office_product in office.enum_keys().map(|x| x.unwrap()) {
+        if ["Word", "Excel", "OneNote", "PowerPoint"]
+            .iter()
+            .any(|&s| s == office_product)
+        {
+            println!("{office_product}");
+            let office_product_key =
+                match office.open_subkey(format!("{}\\User MRU", office_product)) {
+                    Ok(regkey) => regkey,
+                    Err(_) => {
+                        eprintln!("Office product does not have an User MRU");
+                        continue;
+                    }
+                };
+
+            // enumerate each live ID
+            // TODO Affichage FolderID nécessaire ?
+            for live_id in office_product_key.enum_keys().map(|x| x.unwrap()) {
+                println!("Live ID: {}\nFile MRU:", live_id);
+                // For File MRU
+                let file_mru = office_product_key.open_subkey(format!("{}\\File MRU", live_id))?;
+                for (name, value) in file_mru.enum_values().map(|x| x.unwrap()) {
+                    if name.contains("FOLDERID") {
+                        continue;
+                    }
+                    println!("{name} {value}");
+                    let start_timestamp: usize = value.to_string().find("T").unwrap();
+                    let timestamp = value.to_string()[start_timestamp+1..start_timestamp+17].to_string();
+                    let timestamp_i64 = i64::from_str_radix(&timestamp, 16).unwrap();
+                    println!("{}", timestamp_i64);
+                }
+
+                println!("\nPlace MRU:");
+                // For Place MRU
+                let place_mru =
+                    office_product_key.open_subkey(format!("{}\\Place MRU", live_id))?;
+                for (name, value) in file_mru.enum_values().map(|x| x.unwrap()) {
+                    if name.contains("FOLDERID") {
+                        continue;
+                    }
+                    println!("{name} {value}");
+                }
+                println!("");
+            }
+        }
+    }
     Ok(())
 }
 
@@ -67,27 +118,35 @@ pub fn iter_list_with_mru_sf(regkey: RegKey) {
             break;
         }
     }
-    println!("MRU position\t| Number\t| Value\n----------------------------------------------");
-    for (name, value) in regkey.enum_values().map(|x| x.unwrap()) {
-        if name == "MRUListEx" {
-            continue;
+
+    unsafe {
+        let mut _com = CoInitialize(None).unwrap();
+        println!("MRU position\t| Number\t| Value\n----------------------------------------------");
+        for (name, value) in regkey.enum_values().map(|x| x.unwrap()) {
+            if name == "MRUListEx" {
+                continue;
+            }
+
+            // resolve this PIDL's absolute path
+            let mut buffer: Vec<u8> = value.bytes;
+            let other_item: IShellItem =
+                SHCreateItemFromIDList(buffer.as_mut_ptr() as *mut ITEMIDLIST).unwrap();
+            let other_name = other_item
+                .GetDisplayName(SIGDN_DESKTOPABSOLUTEPARSING)
+                .unwrap()
+                .to_string()
+                .unwrap();
+            println!(
+                "{}\t\t| {}\t\t| {}",
+                mru_position
+                    .iter()
+                    .position(|x| x.to_string() == name)
+                    .unwrap(),
+                name,
+                other_name
+            );
         }
-        // convert the value in array of u32
-        let mut byte_array: Vec<u16> = Vec::new();
-        for x in (0..value.bytes.len() - 2).step_by(2) {
-            let a: [u8; 2] = value.bytes[x..x + 2].try_into().unwrap();
-            byte_array.push(unsafe { transmute::<[u8; 2], u16>(a) }.to_le())
-        }
-        let split_array = byte_array.split_at(16).0;
-        println!(
-            "{}\t\t| {}\t\t| {:x?}",
-            mru_position
-                .iter()
-                .position(|x| x.to_string() == name)
-                .unwrap(),
-            name,
-            split_array
-        );
+        _com = CoUninitialize();
     }
 }
 
@@ -209,4 +268,15 @@ pub fn print_systemtime(system_time_val: SYSTEMTIME) {
         "{:2}:{:2}:{:2} ",
         system_time_val.wHour, system_time_val.wMinute, system_time_val.wSecond
     );
+}
+
+pub fn rawvalue_to_timestamp(tmp: String) -> LocalDateTime {
+    let hex_to_i64: i64 = 0i64;
+    let nanos_to_secs: i64 = hex_to_i64;
+    let windows_base_date = LocalDate::ymd(1601, Month::January, 1).unwrap();
+    let hour: i8 = 0;
+    let minute: i8 = 0;
+    let windows_base_time = LocalTime::hm(hour, minute).unwrap();
+    let windows_base_timestamp = LocalDateTime::new(windows_base_date, windows_base_time);
+    windows_base_timestamp.add_seconds(nanos_to_secs)
 }
