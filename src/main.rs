@@ -40,7 +40,6 @@ fn main() -> io::Result<()> {
         let extension = comdlg32.open_subkey(sub_key)?;
         iter_list_with_mru_sf(extension);
         println!("");
-        break;
     }
 
     // evidence of typed path
@@ -83,7 +82,8 @@ fn main() -> io::Result<()> {
                     }
                     println!("{name} {value}");
                     let start_timestamp: usize = value.to_string().find("T").unwrap();
-                    let timestamp = value.to_string()[start_timestamp+1..start_timestamp+17].to_string();
+                    let timestamp =
+                        value.to_string()[start_timestamp + 1..start_timestamp + 17].to_string();
                     let timestamp_i64 = i64::from_str_radix(&timestamp, 16).unwrap();
                     println!("{}", timestamp_i64);
                 }
@@ -130,12 +130,20 @@ pub fn iter_list_with_mru_sf(regkey: RegKey) {
             // resolve this PIDL's absolute path
             let mut buffer: Vec<u8> = value.bytes;
             let other_item: IShellItem =
-                SHCreateItemFromIDList(buffer.as_mut_ptr() as *mut ITEMIDLIST).unwrap();
-            let other_name = other_item
-                .GetDisplayName(SIGDN_DESKTOPABSOLUTEPARSING)
-                .unwrap()
-                .to_string()
-                .unwrap();
+                match SHCreateItemFromIDList(buffer.as_mut_ptr() as *mut ITEMIDLIST) {
+                    Ok(ishellitem) => ishellitem,
+                    Err(message) => {
+                        eprintln!("{}", message);
+                        continue;
+                    }
+                };
+            let other_name = match other_item.GetDisplayName(SIGDN_DESKTOPABSOLUTEPARSING) {
+                Ok(display_name) => display_name.to_string().unwrap(),
+                Err(message) => {
+                    eprintln!("{}", message);
+                    continue;
+                }
+            };
             println!(
                 "{}\t\t| {}\t\t| {}",
                 mru_position
