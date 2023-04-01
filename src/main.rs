@@ -102,7 +102,10 @@ pub fn iter_list_with_office_mru(regkey: RegKey) {
         let timestamp = value.to_string()[start_timestamp + 1..start_timestamp + 17].to_string();
         let timestamp_u64 = u64::from_str_radix(&timestamp, 16).unwrap();
         start_timestamp = value.to_string().find("*").unwrap();
-        print!("MRU Time: {}\t MRU location: ", rawvalue_to_timestamp(timestamp_u64));
+        print!(
+            "MRU Time: {}\t MRU location: ",
+            rawvalue_to_timestamp(timestamp_u64)
+        );
         println!(
             "{}",
             value.to_string()[start_timestamp + 1..value.to_string().len() - 1].to_string()
